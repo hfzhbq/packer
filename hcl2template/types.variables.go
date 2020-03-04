@@ -186,6 +186,13 @@ func (variables *Variables) decodeVariableBlock(block *hcl.Block, ectx *hcl.Eval
 		}
 
 		res.DefaultValue = defaultValue
+
+		// It's possible no type attribute was assigned so lets make
+		// sure we have a valid type otherwise there will be issues parsing the value.
+		if res.Type == cty.NilType {
+			res.Type = res.DefaultValue.Type()
+		}
+
 	}
 	if len(attrs) > 0 {
 		keys := []string{}
@@ -198,12 +205,6 @@ func (variables *Variables) decodeVariableBlock(block *hcl.Block, ectx *hcl.Eval
 			Detail:   fmt.Sprintf("unknown variable setting(s): %s", keys),
 			Context:  block.DefRange.Ptr(),
 		})
-	}
-
-	// It's possible no type attribute was assigned so lets make
-	// sure we have a valid type otherwise there will be issues parsing the value.
-	if res.Type == cty.NilType {
-		res.Type = res.DefaultValue.Type()
 	}
 
 	(*variables)[block.Labels[0]] = res
@@ -239,7 +240,8 @@ func (variables Variables) collectVariableValues(env []string, files []*hcl.File
 			continue
 		}
 
-		expr, moreDiags := expressionFromVariableDefinition(name, value, variable.Type)
+		fakeFilename := fmt.Sprintf("<value for var.%s from env>", name)
+		expr, moreDiags := expressionFromVariableDefinition(fakeFilename, value, variable.Type)
 		diags = append(diags, moreDiags...)
 		if moreDiags.HasErrors() {
 			continue
@@ -350,7 +352,8 @@ func (variables Variables) collectVariableValues(env []string, files []*hcl.File
 			continue
 		}
 
-		expr, moreDiags := expressionFromVariableDefinition(name, value, variable.Type)
+		fakeFilename := fmt.Sprintf("<value for var.%s from arguments>", name)
+		expr, moreDiags := expressionFromVariableDefinition(fakeFilename, value, variable.Type)
 		diags = append(diags, moreDiags...)
 		if moreDiags.HasErrors() {
 			continue
@@ -379,12 +382,13 @@ func (variables Variables) collectVariableValues(env []string, files []*hcl.File
 	return diags
 }
 
-func expressionFromVariableDefinition(name string, value string, variableType cty.Type) (hclsyntax.Expression, hcl.Diagnostics) {
+//expressionFromVariableDefinition creates an hclsyntax.Expression that is capable of evaluating the specified value for a given cty.Type.
+// The specified filename is to identify the source of where value originated from in the diagnostics report, if there is an error.
+func expressionFromVariableDefinition(filename string, value string, variableType cty.Type) (hclsyntax.Expression, hcl.Diagnostics) {
 	switch variableType {
 	case cty.String, cty.Number:
 		return &hclsyntax.LiteralValueExpr{Val: cty.StringVal(value)}, nil
 	default:
-		fakeFilename := fmt.Sprintf("<value for var.%s from arguments>", name)
-		return hclsyntax.ParseExpression([]byte(value), fakeFilename, hcl.Pos{Line: 1, Column: 1})
+		return hclsyntax.ParseExpression([]byte(value), filename, hcl.Pos{Line: 1, Column: 1})
 	}
 }
